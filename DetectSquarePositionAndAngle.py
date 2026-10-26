@@ -12,15 +12,15 @@ def detect_squares(image_path):
   # 2. Convert to grayscale
   gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-  # 3. Apply Gaussian blur to reduce noise
-  blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+  # 3. Threshold: Background and gaps are white (~255), squares are grey (~191).
+  # THRESH_BINARY_INV turns grey squares into white (255) and white background into black (0).
+  _, thresh = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
 
-  # 4. Use Adaptive Thresholding to handle varying lighting conditions
-  thresh = cv2.adaptiveThreshold(
-      blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
-  )
+  # Clean up any tiny artifacts with morphological closing
+  kernel = np.ones((3, 3), np.uint8)
+  thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
-  # 5. Find contours in the binary image
+  # 4. Find external contours of the isolated squares
   contours, _ = cv2.findContours(
       thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
   )
@@ -29,64 +29,74 @@ def detect_squares(image_path):
   print(f"{'='*30}\nDetected Squares Analysis:\n{'='*30}")
 
   for cnt in contours:
-    # Filter out small noise contours by area (adjust threshold based on your image resolution)
     area = cv2.contourArea(cnt)
-    if area < 200:
+    if area < 500:  # Filter out small noise
       continue
 
-    # Approximate the contour to a polygon
-    perimeter = cv2.arcLength(cnt, True)
-    approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)
+    # Get the minimum area rotated bounding rectangle
+    rect = cv2.minAreaRect(cnt)
+    center, (width, height), _ = rect
 
-    # A square should have 4 vertices and form a convex polygon
-    if len(approx) == 4 and cv2.isContourConvex(approx):
-      # Calculate the minimum area rotated bounding rectangle
-      rect = cv2.minAreaRect(cnt)
-      center, (width, height), angle = rect
+    if width < 10 or height < 10:
+      continue
 
-      # Avoid division by zero
-      if width > 0 and height > 0:
-        # Check aspect ratio to ensure it's a square (width/height close to 1.0)
-        aspect_ratio = float(width) / height
-        if 0.85 <= aspect_ratio <= 1.15:
-          square_count += 1
+    # Check aspect ratio (width vs height should be close to 1.0 for a square)
+    aspect_ratio = float(width) / height
+    if not (0.75 <= aspect_ratio <= 1.25):
+      continue
 
-          # Note on OpenCV angle: minAreaRect returns angles between -90 and 0 degrees.
-          # If width < height, OpenCV might report width and height swapped along with a 90-degree offset.
-          if width < height:
-            angle += 90
+    # Check fill ratio (Contour Area / Bounding Box Area)
+    # A solid square should have a fill ratio close to 1.0
+    rect_area = width * height
+    fill_ratio = area / rect_area
+    if not (0.75 <= fill_ratio <= 1.05):
+      continue
 
-          print(f"Square #{square_count}:")
-          print(f"  - Center (x, y): ({center[0]:.1f}, {center[1]:.1f})")
-          print(f"  - Tilt Angle:    {angle:.1f}°")
-          print(f"  - Size:          {width:.1f} x {height:.1f}\n")
+    square_count += 1
 
-          # Draw the rotated bounding box on the original image
-          box = cv2.boxPoints(rect)
-          box = np.intp(box)
-          cv2.drawContours(img, [box], 0, (0, 255, 0), 2)
+    # Calculate precise tilt angle from the bounding box edge vector
+    box = cv2.boxPoints(rect)
+    box = np.intp(box)
+    edge_vector = box[1] - box[0]
+    angle = np.arctan2(edge_vector[1], edge_vector[0]) * 180.0 / np.pi
 
-          # Mark the center point
-          cv2.circle(img, (int(center[0]), int(center[1])), 4, (0, 0, 255), -1)
+    # Normalize angle to range [-45, 45]
+    while angle < -45:
+      angle += 90
+    while angle > 45:
+      angle -= 90
 
-          # Put label on the image
-          cv2.putText(
-              img,
-              f"#{square_count} ({angle:.1f}deg)",
-              (int(center[0]) - 30, int(center[1]) - 15),
-              cv2.FONT_HERSHEY_SIMPLEX,
-              0.5,
-              (255, 0, 0),
-              2,
-          )
+    print(f"Square #{square_count}:")
+    print(f"  - Center (x, y): ({center[0]:.1f}, {center[1]:.1f})")
+    print(f"  - Tilt Angle:    {angle:.1f}°")
+    print(f"  - Size:          {width:.1f} x {height:.1f}\n")
+
+    # Draw the rotated bounding box on the original image
+    cv2.drawContours(img, [box], 0, (0, 255, 0), 2)
+
+    # Mark the center point
+    cv2.circle(img, (int(center[0]), int(center[1])), 4, (0, 0, 255), -1)
+
+    # Put label on the image
+    cv2.putText(
+        img,
+        f"#{square_count} ({angle:.1f}deg)",
+        (int(center[0]) - 35, int(center[1]) - 15),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (255, 0, 0),
+        2,
+    )
 
   print(f"Total squares detected: {square_count}")
 
-  # 6. Display the result
+  # 5. Display the result
   cv2.imshow("Detected Squares", img)
   cv2.waitKey(0)
   cv2.destroyAllWindows()
 
 
 # Example usage:
-# detect_squares("path_to_your_image.jpg")
+detect_squares(
+    "D:/self/practice/localRepo/squares in squares/Squares-in-Squares/images/5.png"
+)
